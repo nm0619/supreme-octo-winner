@@ -1,0 +1,70 @@
+app = FastAPI(title="查岗系统")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+class ReportBody(BaseModel):
+    app_name: str
+    event: str
+
+
+@app.post("/report")
+async def report(body: ReportBody, req: Request):
+    auth = req.headers.get("Authorization", "")
+    if auth != f"Bearer {AUTH_TOKEN}":
+        raise HTTPException(401, "Unauthorized")
+    now = datetime.utcnow().isoformat()
+    conn = sqlite3.connect(str(DB_PATH))
+    conn.execute("INSERT INTO records VALUES (?, ?, ?)", (body.app_name, body.event, now))
+    conn.commit()
+    conn.close()
+    return {"status": "ok"}
+  40 changes: 29 additions & 11 deletions 40  
+2
+ 
+Original file line number	Diff line number	Diff line change
+@@ -1,11 +1,29 @@
+@app.get("/ping") async def ping(): return "pong"
+@app.get("/activity/summary") async def summary(): conn = sqlite3.connect(str(DB_PATH)) cur =
+conn.cursor() cur.execute("SELECT app_name, event, timestamp FROM records ORDER BY id
+DESC LIMIT 5") recent = cur.fetchall() cur.execute("SELECT app_name, event, timestamp FROM
+records ORDER BY id ASC") rows = cur.fetchall() conn.close() sessions, opens = {}, {} for r in
+rows: app, ev, ts = r if ev == "open": opens[app] = datetime.fromisoformat(ts) elif ev == "close"
+and app in opens: gap = int((datetime.fromisoformat(ts) - opens[app]).total_seconds())
+sessions[app] = sessions.get(app, 0) + gap del opens[app] return { "recent_apps": [r[0] for r in
+recent], "sessions": sessions }
+if name == "main": port = int(os.environ.get("PORT", 8000)) uvicorn.run(app, host="0.0.0.0",
+port=port)
+@app.get("/ping")
+async def ping():
+    return "pong"
+
+
+@app.get("/activity/summary")
+async def summary():
+    conn = sqlite3.connect(str(DB_PATH))
+    cur = conn.cursor()
+    cur.execute("SELECT app_name, event, timestamp FROM records ORDER BY id DESC LIMIT 5")
+    recent = cur.fetchall()
+    cur.execute("SELECT app_name, event, timestamp FROM records ORDER BY id ASC")
+    rows = cur.fetchall()
+    conn.close()
+    sessions, opens = {}, {}
+    for r in rows:
+        app_name, ev, ts = r
+        if ev == "open":
+            opens[app_name] = datetime.fromisoformat(ts)
+        elif ev == "close" and app_name in opens:
+            gap = int((datetime.fromisoformat(ts) - opens[app_name]).total_seconds())
+            sessions[app_name] = sessions.get(app_name, 0) + gap
+            del opens[app_name]
+    return {"recent_apps": [r[0] for r in recent], "sessions": sessions}
+
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
